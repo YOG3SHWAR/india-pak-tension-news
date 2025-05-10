@@ -13,7 +13,6 @@ export default function RootLayout({
       <body>
         {/* 1. Load AdSense after the page is interactive */}
         <Script
-          strategy="afterInteractive"
           src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${process.env.NEXT_PUBLIC_ADSENSE_PUB_ID}`}
           crossOrigin="anonymous"
         />
