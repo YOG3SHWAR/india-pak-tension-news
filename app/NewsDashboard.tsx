@@ -5,16 +5,84 @@ import useSWRInfinite from "swr/infinite";
 import dynamic from "next/dynamic";
 
 // RSS item type
-interface RssItem {
+export type RssItem = {
   title: string;
   link: string;
   pubDate: string;
   enclosure?: { url: string };
   contentSnippet?: string;
-}
+};
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 const AdUnit = dynamic(() => import("@/components/AdUnit"), { ssr: false });
+
+// Individual news card extracted to top-level component
+function NewsItemCard({ item, idx }: { item: RssItem; idx: number }) {
+  const [imgError, setImgError] = useState(false);
+  const domain = item.link
+    ? new URL(item.link).hostname.replace(/^www\./, "")
+    : "";
+  const hasValidImage =
+    typeof item.enclosure?.url === "string" &&
+    (item.enclosure.url.startsWith("http://") ||
+      item.enclosure.url.startsWith("https://"));
+
+  return (
+    <article className="bg-gray-800 p-5 rounded-2xl shadow-xl flex flex-col h-full">
+      <a
+        href={item.link}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="font-semibold text-lg hover:underline text-gray-100"
+      >
+        {item.title}
+      </a>
+
+      <p className="text-xs text-gray-400 mt-1">
+        {new Date(item.pubDate).toLocaleString()}
+      </p>
+
+      {hasValidImage && !imgError ? (
+        <img
+          src={item.enclosure!.url}
+          alt={item.title}
+          className="w-full h-48 object-cover rounded-lg mt-3"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <div className="w-full h-48 bg-gray-700 rounded-lg mt-3 flex items-center justify-center">
+          <span className="text-gray-500">No image available</span>
+        </div>
+      )}
+
+      <p className="mt-3 text-gray-300 line-clamp-3 flex-1">
+        {item.contentSnippet}
+      </p>
+
+      <button
+        onClick={() =>
+          window.open(
+            `https://www.youtube.com/results?search_query=${encodeURIComponent(
+              item.title
+            )}`,
+            "_blank"
+          )
+        }
+        className="mt-4 w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white font-semibold py-3 rounded-full shadow-xl transform transition-transform duration-200 hover:scale-105"
+      >
+        Check on YouTube
+      </button>
+
+      {idx > 0 && idx % 5 === 0 && (
+        <div className="my-5">
+          <AdUnit slot="9758479058" />
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-4">Source: {domain}</p>
+    </article>
+  );
+}
 
 export default function NewsDashboard() {
   const [activeTab, setActiveTab] = useState<"top" | "latest">("top");
@@ -25,18 +93,16 @@ export default function NewsDashboard() {
 
   const { data, size, setSize } = useSWRInfinite(getKey, fetcher);
 
-  // reset pagination on tab change
   useEffect(() => {
     setSize(1);
   }, [endpoint, setSize]);
 
   const pages = data || [];
   const items = pages.flatMap((p) => p.items as RssItem[]);
-  const hasMore = data ? data[data.length - 1].hasMore : false;
+  const hasMore = !!data && data[data.length - 1].hasMore;
   const isLoadingMore =
     !data || (size > 0 && typeof data[size - 1] === "undefined");
 
-  // infinite scroll
   useEffect(() => {
     function onScroll() {
       if (
@@ -54,106 +120,35 @@ export default function NewsDashboard() {
 
   return (
     <main className="min-h-screen p-4 bg-gray-900 text-gray-100">
-      <header className="mb-4 text-center">
-        <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-bold">
+      <header className="mb-6 text-center">
+        <h1 className="text-2xl sm:text-3xl md:text-4xl lg:text-5xl font-extrabold">
           📰 India–Pakistan Tension News
         </h1>
         <p className="mt-2 text-sm sm:text-base text-gray-400">
-          Everything you need to know!!
+          Everything you need to know
         </p>
       </header>
 
-      {/* Tab selector */}
-      <div className="sticky top-0 bg-gray-900 z-10 flex justify-center space-x-4 py-2">
-        {["top", "latest"].map((tab) => (
+      <div className="sticky top-0 bg-gray-900 z-10 flex justify-center space-x-4 py-3">
+        {(["top", "latest"] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => setActiveTab(tab as any)}
-            className={`px-4 py-2 rounded-full transition-colors duration-200 \$\{activeTab === tab ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'\}`}
+            onClick={() => setActiveTab(tab)}
+            className={`px-5 py-2 rounded-full transition-all duration-200 flex items-center space-x-2 ${
+              activeTab === tab
+                ? "bg-blue-600 text-white shadow-lg ring-2 ring-blue-400"
+                : "bg-gray-700 text-gray-300 hover:bg-gray-600"
+            }`}
           >
-            {tab === "top" ? "🔥 Trending" : "🆕 Latest"}
+            <span>{tab === "top" ? "🔥 Trending" : "🆕 Latest"}</span>
           </button>
         ))}
       </div>
 
-      {/* Articles grid */}
-      <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mt-4 items-stretch">
-        {items.map((item, idx) => {
-          const domain = item.link
-            ? new URL(item.link).hostname.replace(/^www\./, "")
-            : "";
-
-          const hasValidImage =
-            typeof item.enclosure?.url === "string" &&
-            (item.enclosure.url.startsWith("http://") ||
-              item.enclosure.url.startsWith("https://"));
-
-          return (
-            <article
-              key={item.link || idx}
-              className="bg-gray-800 p-4 rounded-2xl shadow-lg flex flex-col h-full"
-            >
-              <a
-                href={item.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-semibold text-lg hover:underline text-gray-100"
-              >
-                {item.title}
-              </a>
-
-              <p className="text-sm text-gray-400 mt-1">
-                {new Date(item.pubDate).toLocaleString()}
-              </p>
-
-              {hasValidImage ? (
-                <img
-                  src={item.enclosure!.url}
-                  alt={item.title}
-                  className="w-full h-48 object-cover rounded-lg mt-2"
-                  onError={(e) => {
-                    e.currentTarget.onerror = null;
-                    e.currentTarget.src = "/placeholder.png";
-                  }}
-                />
-              ) : (
-                <div className="w-full h-48 bg-gray-700 rounded-lg mt-2 flex items-center justify-center">
-                  <span className="text-gray-500">No image available</span>
-                </div>
-              )}
-
-              <p className="mt-2 text-gray-300 line-clamp-3 flex-1">
-                {item.contentSnippet}
-              </p>
-
-              {/* Check on YouTube button */}
-              <div className="mt-4">
-                <button
-                  onClick={() =>
-                    window.open(
-                      `https://www.youtube.com/results?search_query=${encodeURIComponent(
-                        item.title
-                      )}`,
-                      "_blank"
-                    )
-                  }
-                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white font-semibold py-3 rounded-full shadow-md transform transition-transform duration-200 hover:scale-105"
-                >
-                  Check on YouTube
-                </button>
-              </div>
-
-              {/* Ad after every 5th card */}
-              {idx > 0 && idx % 5 === 0 && (
-                <div className="my-4">
-                  <AdUnit slot="9758479058" />
-                </div>
-              )}
-
-              <p className="text-sm text-gray-400 mt-2">Source: {domain}</p>
-            </article>
-          );
-        })}
+      <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mt-6 items-stretch">
+        {items.map((item, idx) => (
+          <NewsItemCard key={item.link || idx} item={item} idx={idx} />
+        ))}
       </div>
     </main>
   );
