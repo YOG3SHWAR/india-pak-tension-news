@@ -59,7 +59,7 @@ export default function NewsDashboard() {
           📰 India–Pakistan Tension News
         </h1>
         <p className="mt-2 text-sm sm:text-base text-gray-400">
-          Everything you need to know
+          Everything you need to know!!
         </p>
       </header>
 

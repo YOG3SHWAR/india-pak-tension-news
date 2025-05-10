@@ -1,10 +1,9 @@
-// app/api/rss/top/route.ts
 import Parser from "rss-parser";
 import { NextResponse } from "next/server";
 import { FEEDS } from "@/lib/feeds";
 
 const parser = new Parser();
-function stripHtml(html: string = "") {
+function stripHtml(html = "") {
   return html
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
@@ -16,9 +15,10 @@ export async function GET(req: Request) {
   const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
   const limit = Math.max(1, parseInt(searchParams.get("limit") || "10"));
 
-  // weights defined in parallel with FEEDS order
+  // editorial weights in same order as FEEDS
   const weights = [1, 1, 1, 1, 1, 2, 1, 2];
 
+  // 1) fetch & attach weight + sanitize
   const lists = await Promise.all(
     FEEDS.map((url, idx) =>
       parser.parseURL(url).then((feed) =>
@@ -31,37 +31,46 @@ export async function GET(req: Request) {
     )
   );
 
-  // build count/weight maps
+  // 2) build maps for consensus and max weight
   const countMap = new Map<string, number>();
   const weightMap = new Map<string, number>();
   const itemMap = new Map<string, any>();
-  for (const pageItems of lists) {
-    for (const item of pageItems) {
-      if (!item.link) continue;
-      countMap.set(item.link, (countMap.get(item.link) || 0) + 1);
-      weightMap.set(
-        item.link,
-        Math.max(weightMap.get(item.link) || 0, item._weight)
-      );
-      if (!itemMap.has(item.link)) itemMap.set(item.link, item);
+
+  for (const items of lists) {
+    for (const it of items) {
+      if (!it.link) continue;
+      // increment how many feeds mentioned this link
+      countMap.set(it.link, (countMap.get(it.link) || 0) + 1);
+      // track highest editorial weight
+      weightMap.set(it.link, Math.max(weightMap.get(it.link) || 0, it._weight));
+      // preserve the first copy
+      if (!itemMap.has(it.link)) itemMap.set(it.link, it);
     }
   }
 
-  // filter & sort
-  const filtered = Array.from(itemMap.values())
-    .filter((item) => {
-      const txt = (item.title + " " + item.contentSnippet).toLowerCase();
-      return txt.includes("india") && txt.includes("pakistan");
-    })
-    .sort((a, b) => {
-      const c = (countMap.get(b.link) || 0) - (countMap.get(a.link) || 0);
-      if (c) return c;
-      const w = (weightMap.get(b.link) || 0) - (weightMap.get(a.link) || 0);
-      if (w) return w;
-      return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
-    });
+  // 3) compute a time-decayed score for each unique item
+  const now = Date.now();
+  const decayPower = 1.2;
+  const scored = Array.from(itemMap.values()).map((item) => {
+    const count = countMap.get(item.link) || 0;
+    const maxWeight = weightMap.get(item.link) || 0;
+    const ageMs = now - new Date(item.pubDate).getTime();
+    const ageHours = ageMs / (1000 * 60 * 60);
+    // score = (count * editorial weight) / (ageHours + 1)^decayPower
+    const score = (count * maxWeight) / Math.pow(ageHours + 1, decayPower);
+    return { ...item, score };
+  });
 
-  // paginate
+  // 4) filter to just India/Pakistan
+  const filtered = scored.filter((item) => {
+    const txt = (item.title + " " + item.contentSnippet).toLowerCase();
+    return txt.includes("india") && txt.includes("pakistan");
+  });
+
+  // 5) sort by descending score
+  filtered.sort((a, b) => b.score - a.score);
+
+  // 6) paginate
   const start = (page - 1) * limit;
   const items = filtered.slice(start, start + limit);
   const hasMore = start + limit < filtered.length;
