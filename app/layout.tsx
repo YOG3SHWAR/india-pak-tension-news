@@ -2,7 +2,7 @@
 import ClientThemeProvider from "./ClientThemeProvider";
 import "./globals.css";
 import Script from "next/script";
-import { Analytics } from "@vercel/analytics/next"
+import { Analytics } from "@vercel/analytics/next";
 
 export default function RootLayout({
   children,
@@ -18,7 +18,7 @@ export default function RootLayout({
           src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${process.env.NEXT_PUBLIC_ADSENSE_PUB_ID}`}
           crossOrigin="anonymous"
         />
-
+        <Analytics />
         <ClientThemeProvider>{children}</ClientThemeProvider>
       </body>
     </html>

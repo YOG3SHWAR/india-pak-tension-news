@@ -69,11 +69,7 @@ export default function NewsDashboard() {
           <button
             key={tab}
             onClick={() => setActiveTab(tab as any)}
-            className={`px-4 py-2 rounded-lg ${
-              activeTab === tab
-                ? "bg-blue-600 text-white"
-                : "bg-gray-700 text-gray-300"
-            }`}
+            className={`px-4 py-2 rounded-full transition-colors duration-200 \$\{activeTab === tab ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'\}`}
           >
             {tab === "top" ? "🔥 Trending" : "🆕 Latest"}
           </button>
@@ -87,7 +83,6 @@ export default function NewsDashboard() {
             ? new URL(item.link).hostname.replace(/^www\./, "")
             : "";
 
-          // Only render valid HTTP(S) images
           const hasValidImage =
             typeof item.enclosure?.url === "string" &&
             (item.enclosure.url.startsWith("http://") ||
@@ -96,7 +91,7 @@ export default function NewsDashboard() {
           return (
             <article
               key={item.link || idx}
-              className="bg-gray-800 p-4 rounded-xl shadow flex flex-col h-full"
+              className="bg-gray-800 p-4 rounded-2xl shadow-lg flex flex-col h-full"
             >
               <a
                 href={item.link}
@@ -111,17 +106,42 @@ export default function NewsDashboard() {
                 {new Date(item.pubDate).toLocaleString()}
               </p>
 
-              {hasValidImage && (
+              {hasValidImage ? (
                 <img
                   src={item.enclosure!.url}
                   alt={item.title}
                   className="w-full h-48 object-cover rounded-lg mt-2"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = "/placeholder.png";
+                  }}
                 />
+              ) : (
+                <div className="w-full h-48 bg-gray-700 rounded-lg mt-2 flex items-center justify-center">
+                  <span className="text-gray-500">No image available</span>
+                </div>
               )}
 
               <p className="mt-2 text-gray-300 line-clamp-3 flex-1">
                 {item.contentSnippet}
               </p>
+
+              {/* Check on YouTube button */}
+              <div className="mt-4">
+                <button
+                  onClick={() =>
+                    window.open(
+                      `https://www.youtube.com/results?search_query=${encodeURIComponent(
+                        item.title
+                      )}`,
+                      "_blank"
+                    )
+                  }
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white font-semibold py-3 rounded-full shadow-md transform transition-transform duration-200 hover:scale-105"
+                >
+                  Check on YouTube
+                </button>
+              </div>
 
               {/* Ad after every 5th card */}
               {idx > 0 && idx % 5 === 0 && (
