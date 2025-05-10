@@ -55,7 +55,7 @@ export async function GET() {
     return txt.includes("india") && txt.includes("pakistan");
   });
 
-  const latest100 = filtered.slice(0, 100);
+  const latest100 = filtered.slice(0, 50);
 
   // 4) return with 5-min cache
   return NextResponse.json(latest100, {

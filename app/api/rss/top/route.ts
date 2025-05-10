@@ -92,7 +92,7 @@ export async function GET() {
   });
 
   // 6) return the top 10
-  const top10 = filtered.slice(0, 100);
+  const top10 = filtered.slice(0, 50);
   return NextResponse.json(top10, {
     headers: {
       "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
