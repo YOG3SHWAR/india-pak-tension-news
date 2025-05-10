@@ -1,31 +1,9 @@
 // app/api/rss/top/route.ts
 import Parser from "rss-parser";
 import { NextResponse } from "next/server";
+import { FEEDS } from "@/lib/feeds";
 
-// assign weights per source
-// app/api/rss/top/route.ts
-const FEEDS: { url: string; weight: number }[] = [
-  // 5 Indian outlets at weight 1
-  {
-    url: "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-    weight: 1,
-  },
-  {
-    url: "https://www.hindustantimes.com/feeds/rss/top-news/rssfeed.xml",
-    weight: 1,
-  },
-  { url: "https://www.thehindu.com/feeder/default.rss", weight: 1 },
-  { url: "https://indianexpress.com/section/india/feed/", weight: 1 },
-  { url: "https://feeds.feedburner.com/ndtvnews-top-stories", weight: 1 },
-
-  // ABC International at weight 2
-  { url: "http://feeds.abcnews.com/abcnews/internationalheadlines", weight: 2 },
-
-  // Al Jazeera “All News” at weight 2
-  { url: "https://www.aljazeera.com/xml/rss/all.xml", weight: 2 },
-];
 const parser = new Parser();
-
 function stripHtml(html: string = "") {
   return html
     .replace(/<[^>]+>/g, " ")
@@ -33,69 +11,67 @@ function stripHtml(html: string = "") {
     .trim();
 }
 
-export async function GET() {
-  // 1) fetch & tag with weight + sanitize snippet
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const limit = Math.max(1, parseInt(searchParams.get("limit") || "10"));
+
+  // weights defined in parallel with FEEDS order
+  const weights = [1, 1, 1, 1, 1, 2, 1, 2];
+
   const lists = await Promise.all(
-    FEEDS.map(({ url, weight }) =>
+    FEEDS.map((url, idx) =>
       parser.parseURL(url).then((feed) =>
         feed.items.map((item) => ({
           ...item,
-          _weight: weight,
+          _weight: weights[idx],
           contentSnippet: stripHtml(item.contentSnippet || item.content || ""),
         }))
       )
     )
   );
 
-  // 2) flatten & dedupe
+  // build count/weight maps
   const countMap = new Map<string, number>();
   const weightMap = new Map<string, number>();
   const itemMap = new Map<string, any>();
-
-  for (const items of lists) {
-    for (const item of items) {
+  for (const pageItems of lists) {
+    for (const item of pageItems) {
       if (!item.link) continue;
-      // count appearances
       countMap.set(item.link, (countMap.get(item.link) || 0) + 1);
-      // track highest weight seen
       weightMap.set(
         item.link,
         Math.max(weightMap.get(item.link) || 0, item._weight)
       );
-      // store first copy of the item
-      if (!itemMap.has(item.link)) {
-        itemMap.set(item.link, item);
-      }
+      if (!itemMap.has(item.link)) itemMap.set(item.link, item);
     }
   }
 
-  // 3) build array with _count and _maxWeight
-  const deduped = Array.from(itemMap.entries()).map(([link, item]) => ({
-    ...item,
-    _count: countMap.get(link)!,
-    _maxWeight: weightMap.get(link)!,
-  }));
+  // filter & sort
+  const filtered = Array.from(itemMap.values())
+    .filter((item) => {
+      const txt = (item.title + " " + item.contentSnippet).toLowerCase();
+      return txt.includes("india") && txt.includes("pakistan");
+    })
+    .sort((a, b) => {
+      const c = (countMap.get(b.link) || 0) - (countMap.get(a.link) || 0);
+      if (c) return c;
+      const w = (weightMap.get(b.link) || 0) - (weightMap.get(a.link) || 0);
+      if (w) return w;
+      return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
+    });
 
-  // 4) filter to only India + Pakistan stories
-  const filtered = deduped.filter((item) => {
-    const txt = (item.title + " " + item.contentSnippet).toLowerCase();
-    return txt.includes("india") && txt.includes("pakistan");
-  });
+  // paginate
+  const start = (page - 1) * limit;
+  const items = filtered.slice(start, start + limit);
+  const hasMore = start + limit < filtered.length;
 
-  // 5) sort by count, then by weight, then by recency
-  filtered.sort((a, b) => {
-    const c = b._count - a._count;
-    if (c) return c;
-    const w = b._maxWeight - a._maxWeight;
-    if (w) return w;
-    return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
-  });
-
-  // 6) return the top 10
-  const top10 = filtered.slice(0, 50);
-  return NextResponse.json(top10, {
-    headers: {
-      "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
-    },
-  });
+  return NextResponse.json(
+    { items, hasMore },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
+      },
+    }
+  );
 }

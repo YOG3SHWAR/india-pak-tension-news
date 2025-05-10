@@ -1,34 +1,18 @@
 // app/api/rss/latest/route.ts
 import Parser from "rss-parser";
 import { NextResponse } from "next/server";
+import { FEEDS } from "@/lib/feeds";
 
 const parser = new Parser();
-const FEEDS = [
-  // — your five Indian outlets —
-  "https://timesofindia.indiatimes.com/rssfeedstopstories.cms",
-  "https://www.hindustantimes.com/feeds/rss/top-news/rssfeed.xml",
-  "https://www.thehindu.com/feeder/default.rss",
-  "https://indianexpress.com/section/india/feed/",
-  "https://feeds.feedburner.com/ndtvnews-top-stories",
+export async function GET(req: Request) {
+  const { searchParams } = new URL(req.url);
+  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+  const limit = Math.max(1, parseInt(searchParams.get("limit") || "10"));
 
-  // + ABC News International
-  "http://feeds.abcnews.com/abcnews/internationalheadlines",
-  // :contentReference[oaicite:0]{index=0}
-
-  // + Reuters via Google News RSS (only India–Pakistan stories, site:reuters.com)
-  "https://news.google.com/news?hl=en-IN&gl=IN&ceid=IN:en&q=India%20Pakistan%20site:reuters.com&output=rss",
-  // :contentReference[oaicite:1]{index=1}
-
-  // + Al Jazeera “All News”
-  "https://www.aljazeera.com/xml/rss/all.xml",
-  // :contentReference[oaicite:2]{index=2}
-];
-
-export async function GET() {
   // 1) fetch & flatten
   const allItems = (
     await Promise.all(
-      FEEDS.map((url) => parser.parseURL(url).then((f) => f.items))
+      FEEDS.map((url) => parser.parseURL(url).then((feed) => feed.items))
     )
   ).flat();
 
@@ -40,27 +24,32 @@ export async function GET() {
     return true;
   });
 
-  // 3) sort & slice
-  deduped.sort(
-    (a, b) =>
-      new Date(b.pubDate || 0).getTime() - new Date(a.pubDate || 0).getTime()
+  // 3) sort & filter for India–Pakistan
+  const filtered = deduped
+    .sort(
+      (a, b) =>
+        new Date(b.pubDate || 0).getTime() - new Date(a.pubDate || 0).getTime()
+    )
+    .filter((item) => {
+      const txt = (
+        item.title +
+        " " +
+        (item.contentSnippet || item.content || "")
+      ).toLowerCase();
+      return txt.includes("india") && txt.includes("pakistan");
+    });
+
+  // 4) paginate
+  const start = (page - 1) * limit;
+  const items = filtered.slice(start, start + limit);
+  const hasMore = start + limit < filtered.length;
+
+  return NextResponse.json(
+    { items, hasMore },
+    {
+      headers: {
+        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
+      },
+    }
   );
-
-  const filtered = deduped.filter((item) => {
-    const txt = (
-      (item.title || "") +
-      " " +
-      (item.contentSnippet || item.content || "")
-    ).toLowerCase();
-    return txt.includes("india") && txt.includes("pakistan");
-  });
-
-  const latest100 = filtered.slice(0, 50);
-
-  // 4) return with 5-min cache
-  return NextResponse.json(latest100, {
-    headers: {
-      "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
-    },
-  });
 }

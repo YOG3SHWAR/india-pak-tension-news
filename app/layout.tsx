@@ -13,7 +13,8 @@ export default function RootLayout({
       <body>
         {/* 1. Load AdSense after the page is interactive */}
         <Script
-          async src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${process.env.NEXT_PUBLIC_ADSENSE_PUB_ID}`}
+          async
+          src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${process.env.NEXT_PUBLIC_ADSENSE_PUB_ID}`}
           crossOrigin="anonymous"
         />
 
@@ -22,3 +23,11 @@ export default function RootLayout({
     </html>
   );
 }
+
+export const metadata = {
+  title: "News Dashboard",
+  icons: {
+    icon: "/favicon.ico", // default favicon
+    shortcut: "/favicon-32x32.png",
+  },
+};
