@@ -1,4 +1,3 @@
-// app/NewsDashboard.tsx
 "use client";
 
 import { useState, useEffect } from "react";
@@ -26,6 +25,7 @@ export default function NewsDashboard() {
 
   const { data, size, setSize } = useSWRInfinite(getKey, fetcher);
 
+  // reset pagination on tab change
   useEffect(() => {
     setSize(1);
   }, [endpoint, setSize]);
@@ -63,6 +63,7 @@ export default function NewsDashboard() {
         </p>
       </header>
 
+      {/* Tab selector */}
       <div className="sticky top-0 bg-gray-900 z-10 flex justify-center space-x-4 py-2">
         {["top", "latest"].map((tab) => (
           <button
@@ -79,11 +80,19 @@ export default function NewsDashboard() {
         ))}
       </div>
 
+      {/* Articles grid */}
       <div className="grid gap-6 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 mt-4 items-stretch">
         {items.map((item, idx) => {
           const domain = item.link
             ? new URL(item.link).hostname.replace(/^www\./, "")
             : "";
+
+          // Only render valid HTTP(S) images
+          const hasValidImage =
+            typeof item.enclosure?.url === "string" &&
+            (item.enclosure.url.startsWith("http://") ||
+              item.enclosure.url.startsWith("https://"));
+
           return (
             <article
               key={item.link || idx}
@@ -97,25 +106,31 @@ export default function NewsDashboard() {
               >
                 {item.title}
               </a>
+
               <p className="text-sm text-gray-400 mt-1">
                 {new Date(item.pubDate).toLocaleString()}
               </p>
-              {item.enclosure?.url && (
+
+              {hasValidImage && (
                 <img
-                  src={item.enclosure.url}
-                  alt=""
+                  src={item.enclosure!.url}
+                  alt={item.title}
                   className="w-full h-48 object-cover rounded-lg mt-2"
                 />
               )}
+
               <p className="mt-2 text-gray-300 line-clamp-3 flex-1">
                 {item.contentSnippet}
               </p>
+
+              {/* Ad after every 5th card */}
               {idx > 0 && idx % 5 === 0 && (
                 <div className="my-4">
                   <AdUnit slot="9758479058" />
                 </div>
               )}
-              <p className="text-sm text-gray-400 mb-2">Source: {domain}</p>
+
+              <p className="text-sm text-gray-400 mt-2">Source: {domain}</p>
             </article>
           );
         })}
