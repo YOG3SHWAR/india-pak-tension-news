@@ -1,9 +1,22 @@
+// app/api/rss/top/route.ts
 import Parser from "rss-parser";
 import { NextResponse } from "next/server";
 import { FEEDS } from "@/lib/feeds";
 
-const parser = new Parser();
-function stripHtml(html = "") {
+export const runtime = "nodejs";
+export const revalidate = 300;
+
+const parser = new Parser({
+  headers: {
+    // pretend to be a modern browser
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+      "AppleWebKit/537.36 (KHTML, like Gecko) " +
+      "Chrome/114.0.0.0 Safari/537.36",
+  },
+});
+
+function stripHtml(html = ""): string {
   return html
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
@@ -11,76 +24,99 @@ function stripHtml(html = "") {
 }
 
 export async function GET(req: Request) {
-  const { searchParams } = new URL(req.url);
-  const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
-  const limit = Math.max(1, parseInt(searchParams.get("limit") || "10"));
+  try {
+    const urlObj = new URL(req.url);
+    const page = Math.max(1, parseInt(urlObj.searchParams.get("page") || "1"));
+    const limit = Math.max(
+      1,
+      parseInt(urlObj.searchParams.get("limit") || "10")
+    );
 
-  // editorial weights in same order as FEEDS
-  const weights = [1, 1, 1, 1, 1, 2, 1, 2];
+    // editorial weights in same order as FEEDS
+    const weights = [1, 1, 1, 1, 1, 2, 1, 2];
 
-  // 1) fetch & attach weight + sanitize
-  const lists = await Promise.all(
-    FEEDS.map((url, idx) =>
-      parser.parseURL(url).then((feed) =>
-        feed.items.map((item) => ({
-          ...item,
-          _weight: weights[idx],
-          contentSnippet: stripHtml(item.contentSnippet || item.content || ""),
-        }))
-      )
-    )
-  );
+    // 1) fetch & sanitize each feed (never reject)
+    const lists: Array<
+      Array<{
+        title: string;
+        link?: string;
+        pubDate?: string;
+        contentSnippet: string;
+        enclosure?: { url: string };
+      }>
+    > = await Promise.all(
+      FEEDS.map(async (feedUrl) => {
+        try {
+          const feed = await parser.parseURL(feedUrl);
+          return feed.items.map((item) => ({
+            title: item.title || "",
+            link: item.link,
+            pubDate: item.pubDate,
+            enclosure: item.enclosure,
+            contentSnippet: stripHtml(
+              item.contentSnippet || item.content || ""
+            ),
+          }));
+        } catch (err) {
+          console.error(`[rss/top] failed to fetch ${feedUrl}:`, err);
+          return [];
+        }
+      })
+    );
 
-  // 2) build maps for consensus and max weight
-  const countMap = new Map<string, number>();
-  const weightMap = new Map<string, number>();
-  const itemMap = new Map<string, any>();
+    // 2) compute score for each item
+    const decay = 1.2;
+    const now = Date.now();
 
-  for (const items of lists) {
-    for (const it of items) {
-      if (!it.link) continue;
-      // increment how many feeds mentioned this link
-      countMap.set(it.link, (countMap.get(it.link) || 0) + 1);
-      // track highest editorial weight
-      weightMap.set(it.link, Math.max(weightMap.get(it.link) || 0, it._weight));
-      // preserve the first copy
-      if (!itemMap.has(it.link)) itemMap.set(it.link, it);
-    }
+    const scored = lists.flatMap((feedItems, feedIdx) => {
+      const w = weights[feedIdx] ?? 1;
+      return feedItems.map((item, idx) => {
+        // recency in hours
+        const pubTime = item.pubDate ? new Date(item.pubDate).getTime() : now;
+        const ageHours = (now - pubTime) / (1000 * 60 * 60);
+
+        // position factor (top of feed => 1, bottom => ~0)
+        const posFactor = feedItems.length
+          ? (feedItems.length - idx) / feedItems.length
+          : 0;
+
+        // keyword boost for “india” & “pakistan”
+        const txt = (item.title + " " + item.contentSnippet).toLowerCase();
+        const indiaHits = (txt.match(/india/g) || []).length;
+        const pakistanHits = (txt.match(/pakistan/g) || []).length;
+        const kwBoost = 1 + indiaHits + pakistanHits;
+
+        const score = (w * posFactor * kwBoost) / Math.pow(ageHours + 1, decay);
+        return { ...item, score };
+      });
+    });
+
+    // 3) filter for both keywords, sort by descending score
+    const filtered = scored
+      .filter((item) => {
+        const txt = (item.title + " " + item.contentSnippet).toLowerCase();
+        return txt.includes("india") && txt.includes("pakistan");
+      })
+      .sort((a, b) => b.score - a.score);
+
+    // 4) paginate
+    const start = (page - 1) * limit;
+    const pageItems = filtered.slice(start, start + limit);
+    const hasMore = start + limit < filtered.length;
+
+    return NextResponse.json(
+      { items: pageItems, hasMore },
+      {
+        headers: {
+          "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
+        },
+      }
+    );
+  } catch (err) {
+    console.error("[rss/top] unexpected error:", err);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 }
+    );
   }
-
-  // 3) compute a time-decayed score for each unique item
-  const now = Date.now();
-  const decayPower = 1.2;
-  const scored = Array.from(itemMap.values()).map((item) => {
-    const count = countMap.get(item.link) || 0;
-    const maxWeight = weightMap.get(item.link) || 0;
-    const ageMs = now - new Date(item.pubDate).getTime();
-    const ageHours = ageMs / (1000 * 60 * 60);
-    // score = (count * editorial weight) / (ageHours + 1)^decayPower
-    const score = (count * maxWeight) / Math.pow(ageHours + 1, decayPower);
-    return { ...item, score };
-  });
-
-  // 4) filter to just India/Pakistan
-  const filtered = scored.filter((item) => {
-    const txt = (item.title + " " + item.contentSnippet).toLowerCase();
-    return txt.includes("india") && txt.includes("pakistan");
-  });
-
-  // 5) sort by descending score
-  filtered.sort((a, b) => b.score - a.score);
-
-  // 6) paginate
-  const start = (page - 1) * limit;
-  const items = filtered.slice(start, start + limit);
-  const hasMore = start + limit < filtered.length;
-
-  return NextResponse.json(
-    { items, hasMore },
-    {
-      headers: {
-        "Cache-Control": "public, s-maxage=300, stale-while-revalidate=300",
-      },
-    }
-  );
 }
