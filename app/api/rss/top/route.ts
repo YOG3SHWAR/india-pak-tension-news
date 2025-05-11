@@ -8,7 +8,6 @@ export const revalidate = 300;
 
 const parser = new Parser({
   headers: {
-    // pretend to be a modern browser
     "User-Agent":
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
       "AppleWebKit/537.36 (KHTML, like Gecko) " +
@@ -23,6 +22,14 @@ function stripHtml(html = ""): string {
     .trim();
 }
 
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 3);
+}
+
 export async function GET(req: Request) {
   try {
     const urlObj = new URL(req.url);
@@ -32,77 +39,97 @@ export async function GET(req: Request) {
       parseInt(urlObj.searchParams.get("limit") || "10")
     );
 
-    // editorial weights in same order as FEEDS
-    const weights = [1, 1, 1, 1, 1, 2, 1, 2];
+    // editorial weights (in same order as FEEDS)
+    const weights = [1, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1];
 
-    // 1) fetch & sanitize each feed (never reject)
-    const lists: Array<
-      Array<{
-        title: string;
-        link?: string;
-        pubDate?: string;
-        contentSnippet: string;
-        enclosure?: { url: string };
-      }>
-    > = await Promise.all(
-      FEEDS.map(async (feedUrl) => {
+    // 1) fetch & sanitize each feed
+    const rawLists = await Promise.all(
+      FEEDS.map(async (feedUrl, idx) => {
+        const w = weights[idx] ?? 1;
         try {
           const feed = await parser.parseURL(feedUrl);
-          return feed.items.map((item) => ({
-            title: item.title || "",
-            link: item.link,
-            pubDate: item.pubDate,
-            enclosure: item.enclosure,
-            contentSnippet: stripHtml(
-              item.contentSnippet || item.content || ""
-            ),
+          return feed.items.map((itm) => ({
+            title: itm.title || "",
+            link: itm.link,
+            pubDate: itm.pubDate,
+            enclosure: itm.enclosure,
+            contentSnippet: stripHtml(itm.contentSnippet || itm.content || ""),
+            weight: w,
           }));
-        } catch (err) {
-          console.error(`[rss/top] failed to fetch ${feedUrl}:`, err);
+        } catch (e) {
+          console.error(`[rss/top] failed to fetch ${feedUrl}`, e);
           return [];
         }
       })
     );
 
-    // 2) compute score for each item
-    const decay = 1.2;
-    const now = Date.now();
+    // flatten
+    const allItems = rawLists.flat();
 
-    const scored = lists.flatMap((feedItems, feedIdx) => {
-      const w = weights[feedIdx] ?? 1;
-      return feedItems.map((item, idx) => {
-        // recency in hours
-        const pubTime = item.pubDate ? new Date(item.pubDate).getTime() : now;
-        const ageHours = (now - pubTime) / (1000 * 60 * 60);
-
-        // position factor (top of feed => 1, bottom => ~0)
-        const posFactor = feedItems.length
-          ? (feedItems.length - idx) / feedItems.length
-          : 0;
-
-        // keyword boost for “india” & “pakistan”
-        const txt = (item.title + " " + item.contentSnippet).toLowerCase();
-        const indiaHits = (txt.match(/india/g) || []).length;
-        const pakistanHits = (txt.match(/pakistan/g) || []).length;
-        const kwBoost = 1 + indiaHits + pakistanHits;
-
-        const score = (w * posFactor * kwBoost) / Math.pow(ageHours + 1, decay);
-        return { ...item, score };
-      });
+    // 2) initial filter for India & Pakistan
+    const keywordFiltered = allItems.filter((item) => {
+      const txt = (item.title + " " + item.contentSnippet).toLowerCase();
+      return txt.includes("india") && txt.includes("pakistan");
     });
 
-    // 3) filter for both keywords, sort by descending score
-    const filtered = scored
-      .filter((item) => {
-        const txt = (item.title + " " + item.contentSnippet).toLowerCase();
-        return txt.includes("india") && txt.includes("pakistan");
-      })
-      .sort((a, b) => b.score - a.score);
+    if (keywordFiltered.length === 0) {
+      return NextResponse.json({ items: [], hasMore: false });
+    }
 
-    // 4) paginate
+    // 3) build document frequencies (DF)
+    const dfMap = new Map<string, number>();
+    const docsTokens: string[][] = [];
+
+    for (const item of keywordFiltered) {
+      const tokens = tokenize(item.title + " " + item.contentSnippet);
+      docsTokens.push(tokens);
+      const unique = new Set(tokens);
+      for (const term of unique) {
+        dfMap.set(term, (dfMap.get(term) || 0) + 1);
+      }
+    }
+
+    const N = keywordFiltered.length;
+    const idfMap = new Map<string, number>();
+    for (const [term, df] of dfMap) {
+      idfMap.set(term, Math.log((N + 1) / (df + 1)) + 1);
+    }
+
+    // 4) compute TF-IDF + recency score
+    const decay = 0.8; // gentler decay
+    const now = Date.now();
+
+    const scored = keywordFiltered.map((item, idx) => {
+      const tokens = docsTokens[idx];
+      const termCounts = tokens.reduce((map, t) => {
+        map.set(t, (map.get(t) || 0) + 1);
+        return map;
+      }, new Map<string, number>());
+      const len = tokens.length || 1;
+
+      // TF-IDF
+      let tfidf = 0;
+      for (const [term, count] of termCounts) {
+        const tf = count / len;
+        const idf = idfMap.get(term) || 0;
+        tfidf += tf * idf;
+      }
+
+      // recency
+      const pubTime = item.pubDate ? new Date(item.pubDate).getTime() : now;
+      const ageHrs = (now - pubTime) / (1000 * 60 * 60);
+      const recencyFactor = 1 / Math.pow(ageHrs + 1, decay);
+
+      // final score
+      const score = tfidf * item.weight * recencyFactor;
+      return { ...item, score };
+    });
+
+    // 5) sort & paginate
+    scored.sort((a, b) => b.score - a.score);
     const start = (page - 1) * limit;
-    const pageItems = filtered.slice(start, start + limit);
-    const hasMore = start + limit < filtered.length;
+    const pageItems = scored.slice(start, start + limit);
+    const hasMore = start + limit < scored.length;
 
     return NextResponse.json(
       { items: pageItems, hasMore },
