@@ -1,9 +1,10 @@
 // app/api/rss/top/route.ts
 import Parser from "rss-parser";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { FEEDS } from "@/lib/feeds";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const revalidate = 300;
 
 const parser = new Parser({
@@ -30,19 +31,14 @@ function tokenize(text: string): string[] {
     .filter((w) => w.length > 3);
 }
 
-export async function GET(req: Request) {
+export async function GET(req: NextRequest) {
   try {
-    const urlObj = new URL(req.url);
-    const page = Math.max(1, parseInt(urlObj.searchParams.get("page") || "1"));
-    const limit = Math.max(
-      1,
-      parseInt(urlObj.searchParams.get("limit") || "10")
-    );
+    const { searchParams } = req.nextUrl;
+    const page = Math.max(1, parseInt(searchParams.get("page") || "1"));
+    const limit = Math.max(1, parseInt(searchParams.get("limit") || "10"));
 
-    // editorial weights (in same order as FEEDS)
     const weights = [1, 1, 1, 1, 1, 2, 1, 2, 1, 1, 1, 1, 1, 1];
 
-    // 1) fetch & sanitize each feed
     const rawLists = await Promise.all(
       FEEDS.map(async (feedUrl, idx) => {
         const w = weights[idx] ?? 1;
@@ -56,76 +52,56 @@ export async function GET(req: Request) {
             contentSnippet: stripHtml(itm.contentSnippet || itm.content || ""),
             weight: w,
           }));
-        } catch (e) {
-          console.error(`[rss/top] failed to fetch ${feedUrl}`, e);
+        } catch {
           return [];
         }
       })
     );
 
-    // flatten
     const allItems = rawLists.flat();
-
-    // 2) initial filter for India & Pakistan
     const keywordFiltered = allItems.filter((item) => {
       const txt = (item.title + " " + item.contentSnippet).toLowerCase();
       return txt.includes("india") && txt.includes("pakistan");
     });
-
-    if (keywordFiltered.length === 0) {
+    if (!keywordFiltered.length) {
       return NextResponse.json({ items: [], hasMore: false });
     }
 
-    // 3) build document frequencies (DF)
     const dfMap = new Map<string, number>();
     const docsTokens: string[][] = [];
-
     for (const item of keywordFiltered) {
       const tokens = tokenize(item.title + " " + item.contentSnippet);
       docsTokens.push(tokens);
       const unique = new Set(tokens);
-      for (const term of unique) {
-        dfMap.set(term, (dfMap.get(term) || 0) + 1);
-      }
+      unique.forEach((t) => dfMap.set(t, (dfMap.get(t) || 0) + 1));
     }
-
     const N = keywordFiltered.length;
     const idfMap = new Map<string, number>();
-    for (const [term, df] of dfMap) {
+    dfMap.forEach((df, term) => {
       idfMap.set(term, Math.log((N + 1) / (df + 1)) + 1);
-    }
+    });
 
-    // 4) compute TF-IDF + recency score
-    const decay = 0.8; // gentler decay
+    const decay = 0.8;
     const now = Date.now();
-
     const scored = keywordFiltered.map((item, idx) => {
       const tokens = docsTokens[idx];
-      const termCounts = tokens.reduce((map, t) => {
-        map.set(t, (map.get(t) || 0) + 1);
-        return map;
-      }, new Map<string, number>());
+      const termCounts = tokens.reduce(
+        (m, t) => m.set(t, (m.get(t) || 0) + 1),
+        new Map<string, number>()
+      );
       const len = tokens.length || 1;
-
-      // TF-IDF
       let tfidf = 0;
-      for (const [term, count] of termCounts) {
-        const tf = count / len;
+      termCounts.forEach((cnt, term) => {
+        const tf = cnt / len;
         const idf = idfMap.get(term) || 0;
         tfidf += tf * idf;
-      }
-
-      // recency
+      });
       const pubTime = item.pubDate ? new Date(item.pubDate).getTime() : now;
       const ageHrs = (now - pubTime) / (1000 * 60 * 60);
       const recencyFactor = 1 / Math.pow(ageHrs + 1, decay);
-
-      // final score
-      const score = tfidf * item.weight * recencyFactor;
-      return { ...item, score };
+      return { ...item, score: tfidf * item.weight * recencyFactor };
     });
 
-    // 5) sort & paginate
     scored.sort((a, b) => b.score - a.score);
     const start = (page - 1) * limit;
     const pageItems = scored.slice(start, start + limit);
@@ -139,8 +115,7 @@ export async function GET(req: Request) {
         },
       }
     );
-  } catch (err) {
-    console.error("[rss/top] unexpected error:", err);
+  } catch {
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
