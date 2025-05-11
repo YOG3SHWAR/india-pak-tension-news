@@ -55,7 +55,10 @@ function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
   const page = params.get("page") || "1";
   const base = window.location.origin + window.location.pathname;
   const anchor = `card-${encodeURIComponent(item.link)}`;
-  const shareText = `${item.title} ${base}?tab=${tab}&page=${page}#${anchor} \n Shared via india-pak-tension-news.vercel.app`;
+  const shareText = `"${item.title}"
+${item.link}
+
+Shared via https://india-pak-tension-news.vercel.app`;
 
   // simple share without images
   const handleShare = () => {
