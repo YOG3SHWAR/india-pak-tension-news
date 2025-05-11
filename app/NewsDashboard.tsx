@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import useSWRInfinite from "swr/infinite";
 import dynamic from "next/dynamic";
-import html2canvas from "html2canvas";
 
 // RSS item type
 type RssItem = {
@@ -56,39 +55,17 @@ function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
   const page = params.get("page") || "1";
   const base = window.location.origin + window.location.pathname;
   const anchor = `card-${encodeURIComponent(item.link)}`;
-  const shareText = `${item.title} ${base}?tab=${tab}&page=${page}#${anchor}`;
+  const shareText = `${item.title} ${base}?tab=${tab}&page=${page}#${anchor} shared via MyWebsite.com`;
 
-  // capture & share image via Web Share API
-  const handleShareImage = async () => {
-    if (!containerRef?.current) return;
-    try {
-      const canvas = await html2canvas(containerRef.current, {
-        backgroundColor: null,
-        scale: 2,
-        useCORS: true,
-      });
-      const blob: Blob | null = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/png")
-      );
-      if (!blob) throw new Error("Capture failed");
-      const file = new File([blob], "article.png", { type: "image/png" });
-      if (navigator.canShare?.({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: item.title,
-          text: shareText,
-        });
-      } else {
-        // fallback to WhatsApp link
-        window.open(
-          `https://wa.me/?text=${encodeURIComponent(shareText)}`,
-          "_blank"
-        );
-      }
-    } catch (error) {
-      console.error(error);
-      alert(
-        "Failed to capture or share image. Please try on a supported mobile device."
+  // simple share without images
+  const handleShare = () => {
+    // use Web Share if supported
+    if (navigator.canShare?.({ text: shareText })) {
+      navigator.share({ title: item.title, text: shareText });
+    } else {
+      window.open(
+        `https://wa.me/?text=${encodeURIComponent(shareText)}`,
+        "_blank"
       );
     }
   };
@@ -140,7 +117,7 @@ function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
           Check on YouTube
         </button>
         <button
-          onClick={handleShareImage}
+          onClick={handleShare}
           className="w-1/4 inline-flex items-center justify-center bg-gradient-to-r from-green-300 to-green-500 hover:from-green-400 hover:to-green-600 text-white p-3 rounded-full shadow-lg transform transition-transform duration-200 hover:-translate-y-1"
         >
           <img src="/images/share.svg" alt="Share" className="w-6 h-6" />
@@ -198,7 +175,7 @@ export default function NewsDashboard() {
 
   items.forEach((item) => {
     if (!cardRefs.current[item.link]) {
-      cardRefs.current[item.link] = React.createRef<HTMLDivElement>();
+      cardRefs.current[item.link] = React.createRef<HTMLDivElement | null>();
     }
   });
 
