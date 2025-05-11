@@ -1,3 +1,4 @@
+// components/NewsDashboard.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -26,7 +27,6 @@ interface NewsItemCardProps {
 
 function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
   const [imgError, setImgError] = useState(false);
-  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
   const domain = item.link
     ? new URL(item.link).hostname.replace(/^www\./, "")
     : "";
@@ -35,20 +35,7 @@ function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
     typeof item.enclosure?.url === "string" &&
     (item.enclosure.url.startsWith("http://") ||
       item.enclosure.url.startsWith("https://"));
-
-  useEffect(() => {
-    if (!hasValidImage || imgError) {
-      fetch(`/api/image-search?query=${encodeURIComponent(item.title)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data?.url) setFallbackUrl(data.url);
-        })
-        .catch(() => setFallbackUrl(null));
-    }
-  }, [hasValidImage, imgError, item.title]);
-
-  const imageSrc =
-    !hasValidImage || imgError ? fallbackUrl : item.enclosure?.url;
+  const imageSrc = hasValidImage && !imgError ? item.enclosure!.url : null;
 
   // derive share text
   const params = useSearchParams();
@@ -79,7 +66,7 @@ function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
           text: shareText,
         });
       } else {
-        // fallback to WhatsApp link
+        // fallback to sharing link only
         window.open(
           `https://wa.me/?text=${encodeURIComponent(shareText)}`,
           "_blank"
@@ -111,7 +98,7 @@ function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
       {imageSrc ? (
         <img
           crossOrigin="anonymous"
-          src={imageSrc!}
+          src={imageSrc}
           alt={item.title}
           className="w-full h-56 object-cover rounded-xl mt-1 border-2 border-green-100 shadow-md"
           onError={() => setImgError(true)}
@@ -166,7 +153,7 @@ export default function NewsDashboard() {
   const [activeTab, setActiveTab] = useState<"top" | "latest">(initialTab);
   const [selectedLink, setSelectedLink] = useState<string | null>(null);
 
-  const cardRefs = useRef<
+  const cardRefs = React.useRef<
     Record<string, React.RefObject<HTMLDivElement | null>>
   >({});
 
@@ -196,12 +183,12 @@ export default function NewsDashboard() {
   const isLoadingMore =
     !data || (size > 0 && typeof data[size - 1] === "undefined");
 
-  items.forEach((item) => {
-    if (!cardRefs.current[item.link]) {
-      cardRefs.current[item.link] = React.createRef<HTMLDivElement>();
-    }
-  });
+  // initialize to pageParam pages
+  useEffect(() => {
+    setSize(pageParam);
+  }, [endpoint, pageParam, setSize]);
 
+  // infinite scroll
   useEffect(() => {
     function onScroll() {
       if (
