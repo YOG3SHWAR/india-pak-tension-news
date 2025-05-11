@@ -79,7 +79,16 @@ Shared via https://india-pak-tension-news.vercel.app`;
       id={anchor}
       className="bg-white bg-opacity-80 backdrop-blur-lg p-6 rounded-2xl shadow-2xl border-2 border-yellow-200 flex flex-col h-full font-serif"
     >
-      <h2 className="text-2xl text-green-800 mb-2">{item.title}</h2>
+      <h2 className="text-2xl text-green-800 mb-2">
+        <a
+          href={item.link}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="hover:underline"
+        >
+          {item.title}
+        </a>
+      </h2>
       <p className="text-xs text-gray-600 italic mb-4">
         {new Date(item.pubDate).toLocaleDateString(undefined, {
           day: "numeric",
