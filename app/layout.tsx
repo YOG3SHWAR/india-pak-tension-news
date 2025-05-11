@@ -4,6 +4,13 @@ import "./globals.css";
 import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 
+export const metadata = {
+  title: "India–Pakistan Tension News",
+  icons: {
+    icon: "/logo.svg", // your SVG favicon
+  },
+};
+
 export default function RootLayout({
   children,
 }: {
@@ -11,6 +18,8 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      {/* ← This tells Next.js where to inject your metadata */}
+      <head />
       <body>
         {/* 1. Load AdSense after the page is interactive */}
         <Script
@@ -24,11 +33,3 @@ export default function RootLayout({
     </html>
   );
 }
-
-export const metadata = {
-  title: "News Dashboard",
-  icons: {
-    icon: "/favicon.ico", // default favicon
-    shortcut: "/favicon-32x32.png",
-  },
-};

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<svg width="200" height="200" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="100" cy="100" r="90" fill="#E2F0D9" stroke="#A3C293" stroke-width="8" />
+
+  <!-- Newspaper icon: stylized lines -->
+
+  <rect x="40" y="60" width="120" height="80" fill="#FFFFFF" stroke="#6B8E23" stroke-width="4" rx="8" />
+  <line x1="50" y1="75" x2="150" y2="75" stroke="#6B8E23" stroke-width="3" />
+  <line x1="50" y1="95" x2="150" y2="95" stroke="#6B8E23" stroke-width="3" />
+  <line x1="50" y1="115" x2="150" y2="115" stroke="#6B8E23" stroke-width="3" />
+
+  <!-- Title initials "IP" -->
+
+<text x="100" y="150" font-family="Georgia, serif" font-size="48" fill="#4B5320" text-anchor="middle">IP</text> </svg>
