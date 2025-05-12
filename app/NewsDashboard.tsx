@@ -1,3 +1,4 @@
+// components/NewsDashboard.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -23,59 +24,37 @@ interface NewsItemCardProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
 }
 
-function NewsItemCard({ item, idx, containerRef }: NewsItemCardProps) {
-  const [imgError, setImgError] = useState(false);
-  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
+function NewsItemCard({ item, idx }: NewsItemCardProps) {
   const domain = item.link
     ? new URL(item.link).hostname.replace(/^www\./, "")
     : "";
+  const imageSrc = item.enclosure?.url || null;
 
-  const hasValidImage =
-    typeof item.enclosure?.url === "string" &&
-    (item.enclosure.url.startsWith("http://") ||
-      item.enclosure.url.startsWith("https://"));
+  // format publication time: hours ago if <24h, else full date/time
+  const pubDateObj = new Date(item.pubDate);
+  const now = Date.now();
+  const diffMs = now - pubDateObj.getTime();
+  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+  const displayTime =
+    diffHours < 24
+      ? `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`
+      : pubDateObj.toLocaleString(undefined, {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+          hour: "numeric",
+          minute: "numeric",
+        });
 
-  useEffect(() => {
-    if (!hasValidImage || imgError) {
-      fetch(`/api/image-search?query=${encodeURIComponent(item.title)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data?.url) setFallbackUrl(data.url);
-        })
-        .catch(() => setFallbackUrl(null));
-    }
-  }, [hasValidImage, imgError, item.title]);
-
-  const imageSrc =
-    !hasValidImage || imgError ? fallbackUrl : item.enclosure?.url;
-
-  // derive share text
   const params = useSearchParams();
   const tab = params.get("tab") || "top";
   const page = params.get("page") || "1";
   const base = window.location.origin + window.location.pathname;
   const anchor = `card-${encodeURIComponent(item.link)}`;
-  const shareText = `"${item.title}"
-${item.link}
-
-Shared via https://india-pak-tension-news.vercel.app`;
-
-  // simple share without images
-  const handleShare = () => {
-    // use Web Share if supported
-    if (navigator.canShare?.({ text: shareText })) {
-      navigator.share({ title: item.title, text: shareText });
-    } else {
-      window.open(
-        `https://wa.me/?text=${encodeURIComponent(shareText)}`,
-        "_blank"
-      );
-    }
-  };
+  const shareUrl = `${base}?tab=${tab}&page=${page}#${anchor}`;
 
   return (
     <article
-      ref={containerRef}
       id={anchor}
       className="bg-white bg-opacity-80 backdrop-blur-lg p-6 rounded-2xl shadow-2xl border-2 border-yellow-200 flex flex-col h-full font-serif"
     >
@@ -89,21 +68,13 @@ Shared via https://india-pak-tension-news.vercel.app`;
           {item.title}
         </a>
       </h2>
-      <p className="text-xs text-gray-600 italic mb-4">
-        {new Date(item.pubDate).toLocaleDateString(undefined, {
-          day: "numeric",
-          month: "short",
-          year: "numeric",
-        })}
-      </p>
+      <p className="text-xs text-gray-600 italic mb-4">{displayTime}</p>
 
       {imageSrc ? (
         <img
-          crossOrigin="anonymous"
-          src={imageSrc!}
+          src={imageSrc}
           alt={item.title}
           className="w-full h-56 object-cover rounded-xl mt-1 border-2 border-green-100 shadow-md"
-          onError={() => setImgError(true)}
         />
       ) : (
         <div className="w-full h-56 bg-green-50 rounded-xl mt-1 flex items-center justify-center shadow-inner">
@@ -113,7 +84,6 @@ Shared via https://india-pak-tension-news.vercel.app`;
 
       <p className="mt-4 text-gray-700 flex-1">{item.contentSnippet}</p>
 
-      {/* Styled action buttons */}
       <div className="mt-5 flex items-center space-x-3">
         <button
           onClick={() =>
@@ -124,13 +94,27 @@ Shared via https://india-pak-tension-news.vercel.app`;
               "_blank"
             )
           }
-          className="w-3/4 inline-flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-300 to-yellow-500 hover:from-yellow-400 hover:to-yellow-600 text-white font-semibold py-3 rounded-full shadow-lg transform transition-transform duration-200 hover:-translate-y-1"
+          className="w-3/4 inline-flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-300 to-yellow-500 hover:from-yellow-400 hover:to-yellow-600 text-white font-semibold py-3 rounded-full shadow-lg transition duration-200 hover:-translate-y-1"
         >
           Check on YouTube
         </button>
         <button
-          onClick={handleShare}
-          className="w-1/4 inline-flex items-center justify-center bg-gradient-to-r from-green-300 to-green-500 hover:from-green-400 hover:to-green-600 text-white p-3 rounded-full shadow-lg transform transition-transform duration-200 hover:-translate-y-1"
+          onClick={() => {
+            if (navigator.canShare?.({ text: item.title + " " + shareUrl })) {
+              navigator.share({
+                title: item.title,
+                text: item.title + " " + shareUrl,
+              });
+            } else {
+              window.open(
+                `https://wa.me/?text=${encodeURIComponent(
+                  item.title + " " + shareUrl
+                )}`,
+                "_blank"
+              );
+            }
+          }}
+          className="w-1/4 inline-flex items-center justify-center bg-gradient-to-r from-green-300 to-green-500 hover:from-green-400 hover:to-green-600 text-white p-3 rounded-full shadow-lg transition duration-200 hover:-translate-y-1"
         >
           <img src="/images/share.svg" alt="Share" className="w-6 h-6" />
         </button>
@@ -185,11 +169,9 @@ export default function NewsDashboard() {
   const isLoadingMore =
     !data || (size > 0 && typeof data[size - 1] === "undefined");
 
-  items.forEach((item) => {
-    if (!cardRefs.current[item.link]) {
-      cardRefs.current[item.link] = React.createRef<HTMLDivElement | null>();
-    }
-  });
+  useEffect(() => {
+    setSize(pageParam);
+  }, [endpoint, pageParam, setSize]);
 
   useEffect(() => {
     function onScroll() {
